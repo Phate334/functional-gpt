@@ -11,25 +11,50 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = typer.Typer()
-intent = """Judging the intent of the input and returning the answer only in JSON format according to the respective requirements, without any explanation.
-- when no intent is met
-[{"intent": "none"}]
-===="""
-
-for func in enable_funcs.values():
-    intent += func.__doc__.replace("    ", "")
 
 
 @app.command()
-def ask(question: str = typer.Argument(..., help="The question to ask")):
-    res = openai.ChatCompletion.create(
+def ask(
+    question: str = typer.Argument(
+        ...,
+        help=f"Ask a question including the enable intent list: {', '.join(enable_funcs.keys())}",
+    )
+):
+    intent_system = """Judging the intent of the input, and answers will be provided separately in JSON format for each respective intent as per requirement., without any explanation.
+- if not match any intent in below,just return empty list.
+===="""
+    customer_service = (
+        "Answer user's questions based on the following information provided.\n"
+    )
+
+    for func in enable_funcs.values():
+        intent_system += func.__doc__.replace("    ", "")
+    intent_res = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": intent},
+            {"role": "system", "content": intent_system},
             {"role": "user", "content": question},
         ],
+        temperature=0,
     )
-    print(res)
+    intents = json.loads(intent_res.choices[0]["message"]["content"])
+
+    if not intents:
+        print("can't understand your question.")
+        exit(1)
+    for intent in intents:
+        customer_service += json.dumps(
+            enable_funcs[intent["intent"]](**intent["args"]), ensure_ascii=False
+        )
+    intent_res = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": customer_service},
+            {"role": "user", "content": question},
+        ],
+        temperature=0.8,
+    )
+    print(intent_res.choices[0]["message"]["content"])
 
 
 if __name__ == "__main__":
